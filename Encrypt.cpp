@@ -49,10 +49,9 @@ std::string hashing(const std::string & hex, const std::string & enc, const std:
     unsigned char hash512[SHA512_DIGEST_LENGTH] = {0};
 
     std::string result;
-    
 
     if (mode == "decrypt") {
-        encSize = encSize / 8;
+        encSize = encSize / 2;
     }
 
     result.reserve(encSize + 32);
@@ -78,19 +77,13 @@ std::string hashing(const std::string & hex, const std::string & enc, const std:
     }
     std::string binEnc;
     if (mode == "decrypt") {
-        binEnc = enc;
+        binEnc = hexToBinary(enc);
     }
     else {
         binEnc = plainTextToBinary(enc);
     }
     std::string binResult = toBinary(result);
 
-    std::string check = "1000000010100011000111011011011000100101011110011001111101011110011000110110101101011010000110101010100000110100101011101110001100010000000110110001000100010011110100001111101111101110100001111101100111010100100010001110110110100110001011010110011011000011101000000100100001000001100110001000110011010111010111110100001000000111011101111000100111010011101110110001110010001011110101011101111111010101";
-
-    if (binResult == check) {
-        std::cerr << "CHECK";
-    }
-    
     return xorStrings(binEnc, binResult);
 }
 
@@ -101,10 +94,12 @@ std::string xorStrings(const std::string & a, const std::string & b) {
         exit(1);
     }
 
-    std::string encrypted;
+    std::string encrypted = "";
+    encrypted.clear();
     
     for (size_t i = 0; i < a.size(); ++i) {
-        encrypted.push_back((a[i] == '1') ^ (b[i] == '1') ? '1' : '0');
+        encrypted.push_back(((a[i] == '1') ^ (b[i] == '1')) ? '1' : '0');
+
     }
 
     return encrypted;
@@ -220,4 +215,146 @@ std::string plainTextToBinary(const std::string& plainText) {
         binary += std::bitset<8>(c).to_string();
     }
     return binary;
+}
+
+std::string binaryToHex(const std::string& binary) {
+    if (binary.size() % 8 != 0) {
+        throw std::runtime_error("The binary string length must be a multiple of 8");
+    }
+
+    std::stringstream ss;
+    for (size_t i = 0; i < binary.size(); i += 8) {
+        std::bitset<8> bin(binary.substr(i, 8));
+        unsigned n = bin.to_ulong();
+        ss << std::setw(2) << std::setfill('0') << std::hex << n;
+    }
+    return ss.str();
+}
+
+
+size_t callback(const char* in, size_t size, size_t num, std::string* out) {
+    const size_t totalBytes(size * num);
+    out->append(in, totalBytes);
+    return totalBytes;
+}
+
+nlohmann::json sendRPC(const std::string& method, const nlohmann::json& params) {
+    const std::string rpcUser = "mplatt8";
+    const std::string rpcPass = "6d61726320706c617474";
+    const std::string rpcURL = "http://127.0.0.1:18443/";
+
+    CURL* curl = curl_easy_init();
+
+    if (!curl) {
+        throw std::runtime_error("Failed to initialize curl");
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, rpcURL.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+    curl_easy_setopt(curl, CURLOPT_USERNAME, rpcUser.c_str());
+    curl_easy_setopt(curl, CURLOPT_PASSWORD, rpcPass.c_str());
+
+    nlohmann::json payload;
+    payload["jsonrpc"] = "1.0";
+    payload["id"] = "curl";
+    payload["method"] = method;
+    payload["params"] = params;
+
+    std::string payloadStr = payload.dump();
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payloadStr.c_str());
+
+    std::string responseString;
+
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseString);
+
+    CURLcode res = curl_easy_perform(curl);
+    if (res != CURLE_OK) {
+        curl_easy_cleanup(curl);
+        throw std::runtime_error("Curl request failed: " + std::string(curl_easy_strerror(res)));
+    }
+
+    curl_easy_cleanup(curl);
+
+    nlohmann::json response = nlohmann::json::parse(responseString);
+
+    if (response.contains("error") && !response["error"].is_null()) {
+        throw std::runtime_error("RPC error received in response.");
+    }
+
+    return response;
+}
+std::string createTransaction(const std::string & encryptedHex) {
+    nlohmann::json params = nlohmann::json::array();
+    nlohmann::json list = sendRPC("listunspent", params);
+
+    std::vector<Utxo> Utxos;
+
+    for (const auto & utxo : list["result"]) {
+        Utxo u;
+        u.address = utxo["address"];
+        u.txid =       utxo["txid"];
+        u.vout =       utxo["vout"];
+        u.amount =   utxo["amount"];
+        Utxos.push_back(u);
+    }
+    size_t counter = 0;
+    std::cout << "Pick a utxo to spend: " << std::endl;
+    for (const auto & u : Utxos) {
+        std::cout << counter << ") " << "address: " << u.address << " txid: " 
+        << u.txid << " vout: " << u.vout << " amount: " << u.amount << std::endl;
+        counter++;
+    }
+    size_t choice;
+    std::cin >> choice;
+    while (choice < 0 || choice > Utxos.size() - 1) {
+        std::cerr << "Invalid choice. Choose a number from list" << std::endl;
+        std::cin >> choice;
+    }
+
+    auto & ref = Utxos[choice];
+
+    nlohmann::json in = nlohmann::json::array({
+        {
+            {"txid", ref.txid},
+            {"vout", ref.vout}
+        }
+    });
+
+    nlohmann::json out = {
+        {"data", encryptedHex},
+        {ref.address, ref.amount - .01}
+    };
+
+    nlohmann::json txParams = nlohmann::json::array({in, out});
+    nlohmann::json rawTx = sendRPC("createrawtransaction", txParams);
+    std::string hexRawTx = rawTx["result"].get<std::string>();
+
+    nlohmann::json signParams = nlohmann::json::array({hexRawTx});
+    nlohmann::json signedTx = sendRPC("signrawtransactionwithwallet", signParams);
+    std::string hexSignedTx = signedTx["result"]["hex"].get<std::string>();
+
+    nlohmann::json sendParams = nlohmann::json::array({hexSignedTx});
+    nlohmann::json txid = sendRPC("sendrawtransaction", sendParams);
+
+    return txid["result"].get<std::string>();
+}
+
+std::string getOP_RETURN(const std::string & txid) {
+    std::string OP = "";
+    nlohmann::json txParams = nlohmann::json::array({txid, true});
+    nlohmann::json txDetails = sendRPC("getrawtransaction", txParams);
+
+    for (const auto & vout : txDetails["result"]["vout"]) {
+        if (vout["scriptPubKey"]["type"] == "nulldata") {
+            OP = vout["scriptPubKey"]["asm"];
+            OP.erase(0,10);
+            break;
+        }
+    }
+    if (OP == "") {
+        std::cerr << "Failed to find OP_RETURN" << std::endl;
+        exit(1);
+    }
+    return OP;
 }
