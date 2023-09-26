@@ -1,9 +1,9 @@
 # Variables
-C = g++
-CFLAGS = -Wall -std=c++11
-LIBS = -lssl -lcrypto
-SOURCES = BitDrive.cpp Encrypt.cpp
-HEADERS = Encrypt.h
+CXX = g++
+CFLAGS = -Wall -std=c++14 -I/usr/local/include -I/Users/marcplatt/libwally-core/include 
+LIBS = -lssl -lcrypto -lcurl -lwallycore $(shell pkg-config --libs libbitcoin-system)
+SOURCES = BitDrive.cpp Encrypt.cpp Multisig.cpp
+HEADERS = Encrypt.h Multisig.h 
 OBJECTS = $(SOURCES:.cpp=.o)
 EXEC = bit
 
@@ -11,11 +11,11 @@ EXEC = bit
 all: $(EXEC)
 
 $(EXEC): $(OBJECTS)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LIBS)
+	$(CXX) $(CFLAGS) -o $@ $^ $(LIBS)
 
 # To obtain object files
 %.o: %.cpp $(HEADERS)
-	$(CC) -c $(CFLAGS) $< -o $@
+	$(CXX) -c $(CFLAGS) $(shell pkg-config --cflags libbitcoin-system) $< -o $@
 
 # To remove generated files
 clean:

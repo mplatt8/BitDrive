@@ -9,7 +9,7 @@
             "request": "launch",
             "name": "bit",
             "program": "${workspaceFolder}/bit",
-            "args": ["decrypt", "key.txt", "encrypted.txt"],
+            "args": ["Drive", "physical injury crush coach upgrade menu cash say wall message someone mosquito", "encrypted.txt"],
             "cwd": "${workspaceFolder}"
         }
     ]

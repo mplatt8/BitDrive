@@ -3,6 +3,7 @@
 #include <string>
 #include <openssl/evp.h>
 #include "Encrypt.h"
+#include "Multisig.h"
 
 bool handleFileOperation(const std::string& mode, const std::string& keyFile, const std::string& encFile, const std::string& outputFilename) {
     auto content = readIn(keyFile, encFile);
@@ -27,15 +28,27 @@ bool handleFileOperation(const std::string& mode, const std::string& keyFile, co
 }
 
 int main(int argc, char* argv[]) {
-    if (argc != 4 || (argv[1] != std::string("encrypt") && argv[1] != std::string("decrypt"))) {
+    if (argc != 4 || (argv[1] != std::string("encrypt") && argv[1] != std::string("decrypt") && argv[1] != std::string("Drive"))) {
         std::cerr << "Error" << std::endl;
         return 1;
     }
+    
+    wally_init(0);
+
+    
 
     std::string mode = argv[1];
+    if (mode == "Drive") {
+        uint32_t custom_path[] = {0 | BIP32_FLAG_KEY_PRIVATE}; 
+        //, 0 | BIP32_FLAG_KEY_PRIVATE, 0 | BIP32_FLAG_KEY_PRIVATE};
+        PublicKeyGenerator generator;
+        generator.generatePub(argv[2], 0, custom_path, 1);
+    }
     std::string outputFilename = (mode == "encrypt") ? "encrypted.txt" : "decrypted.txt";
 
     return handleFileOperation(mode, argv[2], argv[3], outputFilename) ? 0 : 1;
 }
+
+
 
 
